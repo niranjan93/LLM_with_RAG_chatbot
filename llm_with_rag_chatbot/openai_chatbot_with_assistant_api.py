@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 from collections import deque
@@ -13,6 +14,8 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_openai.chat_models import ChatOpenAI
 from langchain_openai.embeddings import OpenAIEmbeddings
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -54,11 +57,12 @@ You are an assistant helping a clinician perform calculations.
 However, you do not perform the calculations yourself.
 Instead, follow the steps below:
 Step 1: Read the clinician's question (labeled "Question:" below) and identify the calculation the clinician is requesting, if any.
+        - If there are multiple methods available to perform the requested calculation (e.g. MDRD and CKD-EPI for GFR), please ask the clinician which one they prefer to use before proceeding.
 Step 2: Look at the information below (labeled "Information:") to find:
         - The Python code implementing the logic of the calculation
         - The parameters required by that code.
 Step 3: Gather values for all the required parameters.
-        - If the clinician has not provided values for all the required parameters, please ask them for the missing values.
+        - If the clinician has not provided values for all the required parameters, please ask them for the missing values before proceeding.
         - Some parameters are optional. If the clinician does not provide values for these optional parameters, please notify them that they are optional and confirm whether they want to proceed without them.
         - Sometimes, the clinician might provide values in different units than what the code requires. In this case, please convert them to the units required by the code.
 Step 4: Once you have values for all the required parameters, provide the code and a list of value assignments for each parameter, enclosed in triple backticks. (```)
@@ -108,6 +112,7 @@ def execute_code_with_assistant(code):
                 result = message.content[0].text.value
         return result
     else:
+        logger.error("Code execution failed!\nInput code:\n%s\n", code)
         return "Code execution failed."
 
 
@@ -119,6 +124,7 @@ def get_full_context(history, current_query):
 
 
 def process(text, conversation_history):
+    logger.debug("Received input:\n%s\nWith history:\n%s\n", text, "\n".join(("USR> {}\nBOT> {}".format(h[0], h[1]) for h in conversation_history)))
     full_context = get_full_context(conversation_history, text)
     response = chain.invoke(full_context)
     code = (
@@ -127,10 +133,12 @@ def process(text, conversation_history):
         else ""
     )
     if code:
+        logger.debug("Found code:\n%s\n", code)
         print("I am processing your request, this may take a few seconds...")
         execution_result = execute_code_with_assistant(response)
         return execution_result
     else:
+        logger.debug("No code\n")
         return response
 
 
